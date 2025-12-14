@@ -19,6 +19,8 @@ pub enum KeyAction {
     ViewTag,
     ViewNextTag,
     ViewPreviousTag,
+    ViewNextNonEmptyTag,
+    ViewPreviousNonEmptyTag,
     ToggleView,
     MoveToTag,
     ToggleTag,

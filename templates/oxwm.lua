@@ -213,6 +213,14 @@ function oxwm.tag.view_next() end
 ---@return table Action table for keybinding
 function oxwm.tag.view_previous() end
 
+---View/switch to next non-empty tag
+---@return table Action table for keybinding
+function oxwm.tag.view_next_nonempty() end
+
+---View/switch to previous non-empty tag
+---@return table Action table for keybinding
+function oxwm.tag.view_previous_nonempty() end
+
 ---Move focused window to tag
 ---@param index integer Tag index (0-based)
 ---@return table Action table for keybinding

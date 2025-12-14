@@ -222,6 +222,8 @@ impl KeybindOverlay {
             },
             KeyAction::ViewNextTag => "View Next Workspace".to_string(),
             KeyAction::ViewPreviousTag => "View Previous Workspace".to_string(),
+            KeyAction::ViewNextNonEmptyTag => "View Next Non-Empty Workspace".to_string(),
+            KeyAction::ViewPreviousNonEmptyTag => "View Previous Non-Empty Workspace".to_string(),
             KeyAction::ToggleView => match &binding.arg {
                 Arg::Int(n) => format!("Toggle View Workspace {}", n),
                 _ => "Toggle View Workspace".to_string(),

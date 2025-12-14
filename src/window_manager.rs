@@ -825,6 +825,30 @@ impl WindowManager {
                 let current_tag_index = unmask_tag(current_tag_mask);
                 self.view_tag(current_tag_index.saturating_sub(1))?;
             }
+            KeyAction::ViewNextNonEmptyTag => {
+                let monitor = self.get_selected_monitor();
+                let current_tag_mask = monitor.get_selected_tag();
+                let current_tag_index = unmask_tag(current_tag_mask);
+
+                for next_tag_index in (current_tag_index + 1)..self.config.tags.len() {
+                    if self.has_windows_on_tag(monitor.monitor_number, next_tag_index) {
+                        self.view_tag(next_tag_index)?;
+                        break;
+                    }
+                }
+            }
+            KeyAction::ViewPreviousNonEmptyTag => {
+                let monitor = self.get_selected_monitor();
+                let current_tag_mask = monitor.get_selected_tag();
+                let current_tag_index = unmask_tag(current_tag_mask);
+
+                for prev_tag_index in (0..current_tag_index).rev() {
+                    if self.has_windows_on_tag(monitor.monitor_number, prev_tag_index) {
+                        self.view_tag(prev_tag_index)?;
+                        break;
+                    }
+                }
+            }
             KeyAction::ToggleView => {
                 if let Arg::Int(tag_index) = arg {
                     self.toggleview(*tag_index as usize)?;
@@ -4196,6 +4220,27 @@ impl WindowManager {
 
     fn get_selected_monitor(&self) -> &Monitor {
         &self.monitors[self.selected_monitor]
+    }
+
+    fn has_windows_on_tag(&self, monitor_number: usize, tag_index: usize) -> bool {
+        let Some(monitor) = self.monitors.get(monitor_number) else {
+            return false;
+        };
+
+        let mut current = monitor.clients_head;
+        while let Some(window) = current {
+            // A window should always have a client attatched to it.
+            let Some(client) = self.clients.get(&window) else {
+                break;
+            };
+
+            if unmask_tag(client.tags) == tag_index {
+                return true;
+            }
+            current = client.next;
+        }
+
+        false
     }
 
     fn run_autostart_commands(&self) {

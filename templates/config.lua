@@ -145,6 +145,7 @@ oxwm.gaps.set_outer(5, 5)
 -- Examples (uncomment to use):
 oxwm.rule.add({ instance = "gimp", floating = true })                             
 -- oxwm.rule.add({ class = "firefox", title = "Library", floating = true })  
+-- oxwm.rule.add({ class = "firefox", tag = 2 })  
 -- oxwm.rule.add({ instance = "mpv", floating = true })                      
 
 -- To find window properties, use xprop and click on the window

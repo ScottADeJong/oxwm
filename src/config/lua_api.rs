@@ -85,17 +85,17 @@ pub fn register_api(lua: &Lua) -> Result<SharedBuilder, ConfigError> {
 
     let oxwm_table = lua.create_table()?;
 
-    register_spawn(&lua, &oxwm_table, builder.clone())?;
-    register_key_module(&lua, &oxwm_table, builder.clone())?;
-    register_gaps_module(&lua, &oxwm_table, builder.clone())?;
-    register_border_module(&lua, &oxwm_table, builder.clone())?;
-    register_client_module(&lua, &oxwm_table)?;
-    register_layout_module(&lua, &oxwm_table)?;
-    register_tag_module(&lua, &oxwm_table, builder.clone())?;
-    register_monitor_module(&lua, &oxwm_table)?;
-    register_rule_module(&lua, &oxwm_table, builder.clone())?;
-    register_bar_module(&lua, &oxwm_table, builder.clone())?;
-    register_misc(&lua, &oxwm_table, builder.clone())?;
+    register_spawn(lua, &oxwm_table, builder.clone())?;
+    register_key_module(lua, &oxwm_table, builder.clone())?;
+    register_gaps_module(lua, &oxwm_table, builder.clone())?;
+    register_border_module(lua, &oxwm_table, builder.clone())?;
+    register_client_module(lua, &oxwm_table)?;
+    register_layout_module(lua, &oxwm_table)?;
+    register_tag_module(lua, &oxwm_table, builder.clone())?;
+    register_monitor_module(lua, &oxwm_table)?;
+    register_rule_module(lua, &oxwm_table, builder.clone())?;
+    register_bar_module(lua, &oxwm_table, builder.clone())?;
+    register_misc(lua, &oxwm_table, builder.clone())?;
 
     lua.globals().set("oxwm", oxwm_table)?;
 

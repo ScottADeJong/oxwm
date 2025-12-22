@@ -238,7 +238,7 @@ pub fn keysym_from_str(s: &str) -> Option<Keysym> {
         "XF86AudioPause" => Some(XF86_AUDIO_PAUSE),
         "XF86AudioPlay" => Some(XF86_AUDIO_PLAY),
         "XF86AudioPrev" => Some(XF86_AUDIO_PREV),
-        "XF86AudioRaiseVolume" => Some(XF86_AUDIO_RAISE_VOLUME),
+        "AudioRaiseVolume" | "XF86AudioRaiseVolume" => Some(XF86_AUDIO_RAISE_VOLUME),
         "AudioLowerVolume" | "XF86AudioLowerVolume" => Some(XF86_AUDIO_LOWER_VOLUME),
         "AudioMute" | "XF86AudioMute" => Some(XF86_AUDIO_MUTE),
         "XF86AudioMicMute" => Some(XF86_AUDIO_MIC_MUTE),

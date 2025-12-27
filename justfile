@@ -3,6 +3,7 @@ build:
 
 install: build
     cp target/release/oxwm /usr/bin/oxwm
+	cp resources/oxwm.desktop /usr/share/xsessions/oxwm.desktop
     chmod +x /usr/bin/oxwm
     @echo "✓ oxwm installed to /usr/bin/oxwm"
     @echo "  Run 'oxwm --init' to create your config"

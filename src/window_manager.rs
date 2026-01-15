@@ -270,6 +270,7 @@ impl WindowManager {
                 monitor.screen_x as i16,
                 monitor.screen_y as i16,
                 monitor.screen_width as u16,
+                normal_cursor,
             )?;
             bars.push(bar);
         }
@@ -290,6 +291,7 @@ impl WindowManager {
                     .saturating_sub(2 * config.gap_outer_horizontal as i32) as u16,
                 config.scheme_occupied,
                 config.scheme_selected,
+                normal_cursor,
             )?;
             tab_bars.push(tab_bar);
         }

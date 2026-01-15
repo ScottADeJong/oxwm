@@ -44,6 +44,7 @@ impl Bar {
         x: i16,
         y: i16,
         width: u16,
+        cursor: u32,
     ) -> Result<Self, X11Error> {
         let window = connection.generate_id()?;
         let graphics_context = connection.generate_id()?;
@@ -64,7 +65,8 @@ impl Bar {
             &CreateWindowAux::new()
                 .background_pixel(config.scheme_normal.background)
                 .event_mask(EventMask::EXPOSURE | EventMask::BUTTON_PRESS)
-                .override_redirect(1),
+                .override_redirect(1)
+                .cursor(cursor),
         )?;
 
         connection.create_gc(

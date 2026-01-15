@@ -10,7 +10,6 @@ use crate::layout::{Layout, LayoutBox, LayoutType, layout_from_str, next_layout}
 use crate::monitor::{Monitor, detect_monitors};
 use crate::overlay::{ErrorOverlay, KeybindOverlay, Overlay};
 use std::collections::{HashMap, HashSet};
-use x11rb::cursor::Handle as CursorHandle;
 
 use x11rb::connection::Connection;
 use x11rb::protocol::Event;
@@ -187,27 +186,17 @@ impl WindowManager {
         let root = connection.setup().roots[screen_number].root;
         let screen = connection.setup().roots[screen_number].clone();
 
-        let normal_cursor = CursorHandle::new(
-            &connection,
-            screen_number,
-            &x11rb::resource_manager::new_from_default(&connection)?,
-        )?
-        .reply()?
-        .load_cursor(&connection, "left_ptr")?;
-
         connection
             .change_window_attributes(
                 root,
-                &ChangeWindowAttributesAux::new()
-                    .cursor(normal_cursor)
-                    .event_mask(
-                        EventMask::SUBSTRUCTURE_REDIRECT
-                            | EventMask::SUBSTRUCTURE_NOTIFY
-                            | EventMask::PROPERTY_CHANGE
-                            | EventMask::KEY_PRESS
-                            | EventMask::BUTTON_PRESS
-                            | EventMask::POINTER_MOTION,
-                    ),
+                &ChangeWindowAttributesAux::new().event_mask(
+                    EventMask::SUBSTRUCTURE_REDIRECT
+                        | EventMask::SUBSTRUCTURE_NOTIFY
+                        | EventMask::PROPERTY_CHANGE
+                        | EventMask::KEY_PRESS
+                        | EventMask::BUTTON_PRESS
+                        | EventMask::POINTER_MOTION,
+                ),
             )?
             .check()?;
 
@@ -256,6 +245,13 @@ impl WindowManager {
             return Err(WmError::X11(crate::errors::X11Error::DisplayOpenFailed));
         }
 
+        // C has better C interop than rust.
+        let normal_cursor = unsafe { x11::xlib::XCreateFontCursor(display, 68) };
+
+        unsafe {
+            x11::xlib::XDefineCursor(display, root as u64, normal_cursor);
+        }
+
         let font = crate::bar::font::Font::new(display, screen_number as i32, &config.font)?;
 
         let mut bars = Vec::new();
@@ -270,7 +266,7 @@ impl WindowManager {
                 monitor.screen_x as i16,
                 monitor.screen_y as i16,
                 monitor.screen_width as u16,
-                normal_cursor,
+                normal_cursor as u32,
             )?;
             bars.push(bar);
         }
@@ -291,7 +287,7 @@ impl WindowManager {
                     .saturating_sub(2 * config.gap_outer_horizontal as i32) as u16,
                 config.scheme_occupied,
                 config.scheme_selected,
-                normal_cursor,
+                normal_cursor as u32,
             )?;
             tab_bars.push(tab_bar);
         }
@@ -806,7 +802,8 @@ impl WindowManager {
         let window_width = (available_width - total_inner_gaps) / visible_count as i32;
         let scroll_amount = window_width + inner_gap as i32;
 
-        let total_width = tiled_count as i32 * window_width + (tiled_count - 1) as i32 * inner_gap as i32;
+        let total_width =
+            tiled_count as i32 * window_width + (tiled_count - 1) as i32 * inner_gap as i32;
         let max_scroll = (total_width - available_width).max(0);
 
         let current_offset = monitor.scroll_offset;
@@ -817,7 +814,8 @@ impl WindowManager {
         };
         let target_offset = target_offset.clamp(0, max_scroll);
 
-        self.scroll_animation.start(current_offset, target_offset, &self.animation_config);
+        self.scroll_animation
+            .start(current_offset, target_offset, &self.animation_config);
 
         Ok(())
     }
@@ -870,7 +868,8 @@ impl WindowManager {
         let tiled_count = tiled_windows.len();
         if tiled_count <= visible_count {
             if animate && monitor.scroll_offset != 0 {
-                self.scroll_animation.start(monitor.scroll_offset, 0, &self.animation_config);
+                self.scroll_animation
+                    .start(monitor.scroll_offset, 0, &self.animation_config);
             } else if let Some(m) = self.monitors.get_mut(monitor_index) {
                 m.scroll_offset = 0;
             }
@@ -882,7 +881,8 @@ impl WindowManager {
         let window_width = (available_width - total_inner_gaps) / visible_count as i32;
         let scroll_step = window_width + inner_gap as i32;
 
-        let total_width = tiled_count as i32 * window_width + (tiled_count - 1) as i32 * inner_gap as i32;
+        let total_width =
+            tiled_count as i32 * window_width + (tiled_count - 1) as i32 * inner_gap as i32;
         let max_scroll = (total_width - available_width).max(0);
 
         let target_scroll = (target_idx as i32) * scroll_step;
@@ -891,7 +891,8 @@ impl WindowManager {
         let current_offset = monitor.scroll_offset;
         if current_offset != new_offset {
             if animate {
-                self.scroll_animation.start(current_offset, new_offset, &self.animation_config);
+                self.scroll_animation
+                    .start(current_offset, new_offset, &self.animation_config);
             } else {
                 if let Some(m) = self.monitors.get_mut(monitor_index) {
                     m.scroll_offset = new_offset;
@@ -950,11 +951,13 @@ impl WindowManager {
                     };
 
                     let available_width = monitor.screen_width - 2 * outer_gap as i32;
-                    let total_inner_gaps = inner_gap as i32 * (visible_count.min(tiled_count) - 1) as i32;
+                    let total_inner_gaps =
+                        inner_gap as i32 * (visible_count.min(tiled_count) - 1) as i32;
                     let window_width = if tiled_count <= visible_count {
                         (available_width - total_inner_gaps) / tiled_count as i32
                     } else {
-                        (available_width - inner_gap as i32 * (visible_count - 1) as i32) / visible_count as i32
+                        (available_width - inner_gap as i32 * (visible_count - 1) as i32)
+                            / visible_count as i32
                     };
 
                     let scroll_step = window_width + inner_gap as i32;
@@ -963,7 +966,8 @@ impl WindowManager {
                     } else {
                         1
                     };
-                    let last_visible = (first_visible + visible_count as i32 - 1).min(tiled_count as i32);
+                    let last_visible =
+                        (first_visible + visible_count as i32 - 1).min(tiled_count as i32);
 
                     return format!("[{}-{}/{}]", first_visible, last_visible, tiled_count);
                 }
@@ -1979,7 +1983,14 @@ impl WindowManager {
 
             self.fullscreen_windows.remove(&window);
 
-            let (was_floating, restored_x, restored_y, restored_width, restored_height, restored_border) = self
+            let (
+                was_floating,
+                restored_x,
+                restored_y,
+                restored_width,
+                restored_height,
+                restored_border,
+            ) = self
                 .clients
                 .get(&window)
                 .map(|client| {
@@ -2276,7 +2287,11 @@ impl WindowManager {
         }
 
         if self.layout.name() == "scrolling" {
-            if let Some(selected) = self.monitors.get(client_monitor).and_then(|m| m.selected_client) {
+            if let Some(selected) = self
+                .monitors
+                .get(client_monitor)
+                .and_then(|m| m.selected_client)
+            {
                 self.attach_after(window, selected, client_monitor);
             } else {
                 self.attach_aside(window, client_monitor);
@@ -2340,8 +2355,11 @@ impl WindowManager {
             .unwrap_or(false);
 
         if !never_focus {
-            self.connection
-                .set_input_focus(InputFocus::POINTER_ROOT, window, x11rb::CURRENT_TIME)?;
+            self.connection.set_input_focus(
+                InputFocus::POINTER_ROOT,
+                window,
+                x11rb::CURRENT_TIME,
+            )?;
 
             self.connection.change_property(
                 PropMode::REPLACE,
@@ -2361,7 +2379,8 @@ impl WindowManager {
     }
 
     fn grabbuttons(&self, window: Window, focused: bool) -> WmResult<()> {
-        self.connection.ungrab_button(ButtonIndex::ANY, window, ModMask::ANY)?;
+        self.connection
+            .ungrab_button(ButtonIndex::ANY, window, ModMask::ANY)?;
 
         if !focused {
             self.connection.grab_button(
@@ -2433,7 +2452,8 @@ impl WindowManager {
                 self.root,
                 x11rb::CURRENT_TIME,
             )?;
-            self.connection.delete_property(self.root, self.atoms.net_active_window)?;
+            self.connection
+                .delete_property(self.root, self.atoms.net_active_window)?;
         }
 
         Ok(())
@@ -2446,9 +2466,7 @@ impl WindowManager {
             .and_then(|m| m.selected_client);
 
         let mut focus_client = window;
-        if focus_client.is_none()
-            || focus_client.is_some_and(|w| !self.is_visible(w))
-        {
+        if focus_client.is_none() || focus_client.is_some_and(|w| !self.is_visible(w)) {
             let mut current = self
                 .monitors
                 .get(self.selected_monitor)
@@ -2502,8 +2520,11 @@ impl WindowManager {
                 .unwrap_or(false);
 
             if !never_focus {
-                self.connection
-                    .set_input_focus(InputFocus::POINTER_ROOT, win, x11rb::CURRENT_TIME)?;
+                self.connection.set_input_focus(
+                    InputFocus::POINTER_ROOT,
+                    win,
+                    x11rb::CURRENT_TIME,
+                )?;
 
                 self.connection.change_property(
                     PropMode::REPLACE,

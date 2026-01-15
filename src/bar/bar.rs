@@ -65,8 +65,7 @@ impl Bar {
             &CreateWindowAux::new()
                 .background_pixel(config.scheme_normal.background)
                 .event_mask(EventMask::EXPOSURE | EventMask::BUTTON_PRESS)
-                .override_redirect(1)
-                .cursor(cursor),
+                .override_redirect(1),
         )?;
 
         connection.create_gc(
@@ -76,6 +75,11 @@ impl Bar {
                 .foreground(config.scheme_normal.foreground)
                 .background(config.scheme_normal.background),
         )?;
+
+        // Set cursor using xlib after window creation
+        unsafe {
+            x11::xlib::XDefineCursor(display, window as u64, cursor as u64);
+        }
 
         connection.map_window(window)?;
         connection.flush()?;

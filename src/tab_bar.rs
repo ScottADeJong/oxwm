@@ -64,7 +64,6 @@ impl TabBar {
                 .background(scheme_normal.background),
         )?;
 
-        // Set cursor using xlib after window creation
         unsafe {
             x11::xlib::XDefineCursor(display, window as u64, cursor as u64);
         }
@@ -116,7 +115,8 @@ impl TabBar {
         connection.flush()?;
 
         unsafe {
-            let gc = x11::xlib::XCreateGC(self.display, self.surface.pixmap(), 0, std::ptr::null_mut());
+            let gc =
+                x11::xlib::XCreateGC(self.display, self.surface.pixmap(), 0, std::ptr::null_mut());
             x11::xlib::XSetForeground(self.display, gc, self.scheme_normal.background as u64);
             x11::xlib::XFillRectangle(
                 self.display,
@@ -158,17 +158,25 @@ impl TabBar {
             let top_padding = 6;
             let text_y = top_padding + font.ascent();
 
-            self.surface
-                .font_draw()
-                .draw_text(font, scheme.foreground, text_x, text_y, &display_title);
+            self.surface.font_draw().draw_text(
+                font,
+                scheme.foreground,
+                text_x,
+                text_y,
+                &display_title,
+            );
 
             if is_focused {
                 let underline_height = 3;
                 let underline_y = self.height as i16 - underline_height;
 
                 unsafe {
-                    let gc =
-                        x11::xlib::XCreateGC(self.display, self.surface.pixmap(), 0, std::ptr::null_mut());
+                    let gc = x11::xlib::XCreateGC(
+                        self.display,
+                        self.surface.pixmap(),
+                        0,
+                        std::ptr::null_mut(),
+                    );
                     x11::xlib::XSetForeground(self.display, gc, scheme.underline as u64);
                     x11::xlib::XFillRectangle(
                         self.display,

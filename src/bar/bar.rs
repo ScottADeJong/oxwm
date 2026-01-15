@@ -76,7 +76,6 @@ impl Bar {
                 .background(config.scheme_normal.background),
         )?;
 
-        // Set cursor using xlib after window creation
         unsafe {
             x11::xlib::XDefineCursor(display, window as u64, cursor as u64);
         }
@@ -266,7 +265,12 @@ impl Bar {
                 let underline_x = x_position + (underline_padding / 2) as i16;
 
                 unsafe {
-                    let gc = x11::xlib::XCreateGC(display, self.surface.pixmap(), 0, std::ptr::null_mut());
+                    let gc = x11::xlib::XCreateGC(
+                        display,
+                        self.surface.pixmap(),
+                        0,
+                        std::ptr::null_mut(),
+                    );
                     x11::xlib::XSetForeground(display, gc, scheme.underline as u64);
                     x11::xlib::XFillRectangle(
                         display,
@@ -327,9 +331,13 @@ impl Bar {
                     let top_padding = 4;
                     let text_y = top_padding + font.ascent();
 
-                    self.surface
-                        .font_draw()
-                        .draw_text(font, block.color(), x_position, text_y, &text);
+                    self.surface.font_draw().draw_text(
+                        font,
+                        block.color(),
+                        x_position,
+                        text_y,
+                        &text,
+                    );
 
                     if self.block_underlines[i] {
                         let font_height = font.height();
@@ -342,8 +350,12 @@ impl Bar {
                         let underline_x = x_position - (underline_padding / 2) as i16;
 
                         unsafe {
-                            let gc =
-                                x11::xlib::XCreateGC(display, self.surface.pixmap(), 0, std::ptr::null_mut());
+                            let gc = x11::xlib::XCreateGC(
+                                display,
+                                self.surface.pixmap(),
+                                0,
+                                std::ptr::null_mut(),
+                            );
                             x11::xlib::XSetForeground(display, gc, block.color() as u64);
                             x11::xlib::XFillRectangle(
                                 display,

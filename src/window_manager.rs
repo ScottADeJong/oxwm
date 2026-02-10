@@ -455,7 +455,7 @@ impl WindowManager {
         }
 
         let config_str =
-            std::fs::read_to_string(lua_path).map_err(|e| ConfigError::CouldNotReadConfig(e))?;
+            std::fs::read_to_string(lua_path).map_err(ConfigError::CouldNotReadConfig)?;
 
         let config_dir = lua_path.parent();
 
@@ -739,14 +739,14 @@ impl WindowManager {
     }
 
     fn tick_animations(&mut self) -> WmResult<()> {
-        if self.scroll_animation.is_active() {
-            if let Some(new_offset) = self.scroll_animation.update() {
-                if let Some(m) = self.monitors.get_mut(self.selected_monitor) {
-                    m.scroll_offset = new_offset;
-                }
-                self.apply_layout()?;
-                self.update_bar()?;
+        if self.scroll_animation.is_active()
+            && let Some(new_offset) = self.scroll_animation.update()
+        {
+            if let Some(m) = self.monitors.get_mut(self.selected_monitor) {
+                m.scroll_offset = new_offset;
             }
+            self.apply_layout()?;
+            self.update_bar()?;
         }
         Ok(())
     }
@@ -893,10 +893,8 @@ impl WindowManager {
             if animate {
                 self.scroll_animation
                     .start(current_offset, new_offset, &self.animation_config);
-            } else {
-                if let Some(m) = self.monitors.get_mut(monitor_index) {
-                    m.scroll_offset = new_offset;
-                }
+            } else if let Some(m) = self.monitors.get_mut(monitor_index) {
+                m.scroll_offset = new_offset;
             }
         }
 
@@ -919,58 +917,58 @@ impl WindowManager {
     fn get_layout_symbol(&self) -> String {
         let layout_name = self.layout.name();
 
-        if layout_name == "scrolling" {
-            if let Some(monitor) = self.monitors.get(self.selected_monitor) {
-                let visible_count = if monitor.num_master > 0 {
-                    monitor.num_master as usize
+        if layout_name == "scrolling"
+            && let Some(monitor) = self.monitors.get(self.selected_monitor)
+        {
+            let visible_count = if monitor.num_master > 0 {
+                monitor.num_master as usize
+            } else {
+                2
+            };
+
+            let mut tiled_count = 0;
+            let mut current = self.next_tiled(monitor.clients_head, monitor);
+            while let Some(window) = current {
+                tiled_count += 1;
+                if let Some(client) = self.clients.get(&window) {
+                    current = self.next_tiled(client.next, monitor);
                 } else {
-                    2
+                    break;
+                }
+            }
+
+            if tiled_count > 0 {
+                let outer_gap = if self.gaps_enabled {
+                    self.config.gap_outer_vertical
+                } else {
+                    0
+                };
+                let inner_gap = if self.gaps_enabled {
+                    self.config.gap_inner_vertical
+                } else {
+                    0
                 };
 
-                let mut tiled_count = 0;
-                let mut current = self.next_tiled(monitor.clients_head, monitor);
-                while let Some(window) = current {
-                    tiled_count += 1;
-                    if let Some(client) = self.clients.get(&window) {
-                        current = self.next_tiled(client.next, monitor);
-                    } else {
-                        break;
-                    }
-                }
+                let available_width = monitor.screen_width - 2 * outer_gap as i32;
+                let total_inner_gaps =
+                    inner_gap as i32 * (visible_count.min(tiled_count) - 1) as i32;
+                let window_width = if tiled_count <= visible_count {
+                    (available_width - total_inner_gaps) / tiled_count as i32
+                } else {
+                    (available_width - inner_gap as i32 * (visible_count - 1) as i32)
+                        / visible_count as i32
+                };
 
-                if tiled_count > 0 {
-                    let outer_gap = if self.gaps_enabled {
-                        self.config.gap_outer_vertical
-                    } else {
-                        0
-                    };
-                    let inner_gap = if self.gaps_enabled {
-                        self.config.gap_inner_vertical
-                    } else {
-                        0
-                    };
+                let scroll_step = window_width + inner_gap as i32;
+                let first_visible = if scroll_step > 0 {
+                    (monitor.scroll_offset / scroll_step) + 1
+                } else {
+                    1
+                };
+                let last_visible =
+                    (first_visible + visible_count as i32 - 1).min(tiled_count as i32);
 
-                    let available_width = monitor.screen_width - 2 * outer_gap as i32;
-                    let total_inner_gaps =
-                        inner_gap as i32 * (visible_count.min(tiled_count) - 1) as i32;
-                    let window_width = if tiled_count <= visible_count {
-                        (available_width - total_inner_gaps) / tiled_count as i32
-                    } else {
-                        (available_width - inner_gap as i32 * (visible_count - 1) as i32)
-                            / visible_count as i32
-                    };
-
-                    let scroll_step = window_width + inner_gap as i32;
-                    let first_visible = if scroll_step > 0 {
-                        (monitor.scroll_offset / scroll_step) + 1
-                    } else {
-                        1
-                    };
-                    let last_visible =
-                        (first_visible + visible_count as i32 - 1).min(tiled_count as i32);
-
-                    return format!("[{}-{}/{}]", first_visible, last_visible, tiled_count);
-                }
+                return format!("[{}-{}/{}]", first_visible, last_visible, tiled_count);
             }
         }
 
@@ -1042,6 +1040,13 @@ impl WindowManager {
                     }
                 }
 
+                let mut focused_title = None;
+                if let Some(focused_window) = monitor.selected_client
+                    && let Some(focused_client) = self.clients.get(&focused_window)
+                {
+                    focused_title = Some(focused_client.name.clone());
+                };
+
                 let draw_blocks = monitor_index == self.selected_monitor;
                 bar.invalidate();
                 bar.draw(
@@ -1054,6 +1059,7 @@ impl WindowManager {
                     draw_blocks,
                     &layout_symbol,
                     keychord_indicator.as_deref(),
+                    focused_title,
                 )?;
             }
         }
@@ -1119,10 +1125,10 @@ impl WindowManager {
                     match layout_from_str(layout_name) {
                         Ok(layout) => {
                             self.layout = layout;
-                            if let Some(monitor) = self.monitors.get_mut(self.selected_monitor) {
-                                if let Some(ref mut pertag) = monitor.pertag {
-                                    pertag.layouts[pertag.current_tag] = layout_name.to_string();
-                                }
+                            if let Some(monitor) = self.monitors.get_mut(self.selected_monitor)
+                                && let Some(ref mut pertag) = monitor.pertag
+                            {
+                                pertag.layouts[pertag.current_tag] = layout_name.to_string();
                             }
                             if layout_name != "normie" && layout_name != "floating" {
                                 self.floating_windows.clear();
@@ -1141,10 +1147,10 @@ impl WindowManager {
                 match layout_from_str(next_name) {
                     Ok(layout) => {
                         self.layout = layout;
-                        if let Some(monitor) = self.monitors.get_mut(self.selected_monitor) {
-                            if let Some(ref mut pertag) = monitor.pertag {
-                                pertag.layouts[pertag.current_tag] = next_name.to_string();
-                            }
+                        if let Some(monitor) = self.monitors.get_mut(self.selected_monitor)
+                            && let Some(ref mut pertag) = monitor.pertag
+                        {
+                            pertag.layouts[pertag.current_tag] = next_name.to_string();
                         }
                         if next_name != "normie" && next_name != "floating" {
                             self.floating_windows.clear();
@@ -1518,9 +1524,7 @@ impl WindowManager {
                 }
                 monitor.tagset.swap(0, 1);
                 if let Some(ref mut pertag) = monitor.pertag {
-                    let tmp = pertag.previous_tag;
-                    pertag.previous_tag = pertag.current_tag;
-                    pertag.current_tag = tmp;
+                    std::mem::swap(&mut pertag.previous_tag, &mut pertag.current_tag);
                 }
             } else {
                 monitor.selected_tags_index ^= 1;
@@ -1541,10 +1545,10 @@ impl WindowManager {
             }
         }
 
-        if let Some(name) = layout_name {
-            if let Ok(layout) = layout_from_str(&name) {
-                self.layout = layout;
-            }
+        if let Some(name) = layout_name
+            && let Ok(layout) = layout_from_str(&name)
+        {
+            self.layout = layout;
         }
 
         if toggle_bar {
@@ -1599,10 +1603,10 @@ impl WindowManager {
             }
         }
 
-        if let Some(name) = layout_name {
-            if let Ok(layout) = layout_from_str(&name) {
-                self.layout = layout;
-            }
+        if let Some(name) = layout_name
+            && let Ok(layout) = layout_from_str(&name)
+        {
+            self.layout = layout;
         }
 
         if toggle_bar {
@@ -2482,10 +2486,10 @@ impl WindowManager {
             }
         }
 
-        if old_selected != focus_client {
-            if let Some(old_win) = old_selected {
-                self.unfocus(old_win, false)?;
-            }
+        if old_selected != focus_client
+            && let Some(old_win) = old_selected
+        {
+            self.unfocus(old_win, false)?;
         }
 
         if let Some(win) = focus_client {
@@ -4023,9 +4027,9 @@ impl WindowManager {
             let tags = monitor.tagset[monitor.selected_tags_index];
 
             let has_visible_fullscreen = self.fullscreen_windows.iter().any(|&w| {
-                self.clients.get(&w).map_or(false, |c| {
-                    c.monitor_index == monitor_index && (c.tags & tags) != 0
-                })
+                self.clients
+                    .get(&w)
+                    .is_some_and(|c| c.monitor_index == monitor_index && (c.tags & tags) != 0)
             });
 
             if has_visible_fullscreen {
@@ -4034,25 +4038,26 @@ impl WindowManager {
                 }
 
                 for &window in &self.fullscreen_windows {
-                    if let Some(client) = self.clients.get(&window) {
-                        if client.monitor_index == monitor_index && (client.tags & tags) != 0 {
-                            self.connection.configure_window(
-                                window,
-                                &ConfigureWindowAux::new()
-                                    .border_width(0)
-                                    .x(monitor.screen_x)
-                                    .y(monitor.screen_y)
-                                    .width(monitor.screen_width as u32)
-                                    .height(monitor.screen_height as u32)
-                                    .stack_mode(StackMode::ABOVE),
-                            )?;
-                        }
+                    if let Some(client) = self.clients.get(&window)
+                        && client.monitor_index == monitor_index
+                        && (client.tags & tags) != 0
+                    {
+                        self.connection.configure_window(
+                            window,
+                            &ConfigureWindowAux::new()
+                                .border_width(0)
+                                .x(monitor.screen_x)
+                                .y(monitor.screen_y)
+                                .width(monitor.screen_width as u32)
+                                .height(monitor.screen_height as u32)
+                                .stack_mode(StackMode::ABOVE),
+                        )?;
                     }
                 }
-            } else if self.show_bar {
-                if let Some(bar) = self.bars.get(monitor_index) {
-                    self.connection.map_window(bar.window())?;
-                }
+            } else if self.show_bar
+                && let Some(bar) = self.bars.get(monitor_index)
+            {
+                self.connection.map_window(bar.window())?;
             }
         }
 
@@ -4376,10 +4381,9 @@ impl WindowManager {
 
     fn update_window_type(&mut self, window: Window) -> WmResult<()> {
         if let Ok(state_atoms) = self.get_window_atom_list_property(window, self.atoms.net_wm_state)
+            && state_atoms.contains(&self.atoms.net_wm_state_fullscreen)
         {
-            if state_atoms.contains(&self.atoms.net_wm_state_fullscreen) {
-                self.set_window_fullscreen(window, true)?;
-            }
+            self.set_window_fullscreen(window, true)?;
         }
 
         if let Ok(Some(type_atom)) =

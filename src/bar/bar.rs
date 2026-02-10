@@ -191,6 +191,7 @@ impl Bar {
         draw_blocks: bool,
         layout_symbol: &str,
         keychord_indicator: Option<&str>,
+        focused_title: Option<String>,
     ) -> Result<(), X11Error> {
         if !self.needs_redraw {
             return Ok(());
@@ -319,6 +320,8 @@ impl Bar {
             );
         }
 
+        let mut end_of_blocks_x = self.width as i16;
+
         if draw_blocks && !self.status_text.is_empty() {
             let padding = 10;
             let mut x_position = self.width as i16 - padding;
@@ -371,6 +374,34 @@ impl Bar {
                     }
                 }
             }
+            end_of_blocks_x = x_position;
+        }
+
+        if let Some(title) = focused_title {
+            let end_of_layout_x = x_position + 10;
+            let middle_remaining = (end_of_blocks_x - end_of_layout_x) / 2;
+            let mut title_width = font.text_width(&title) as i16;
+            let mut end_of_title = title.len();
+
+            let title_start = match (middle_remaining - title_width / 2) < end_of_layout_x {
+                true => end_of_layout_x + 10,
+                false => middle_remaining - title_width / 2,
+            };
+
+            // possibly a better way to do this, but since not all fonts are monospace
+            // I figured this was the safest and should rarely run more than one or two iterrations
+            while title_start + title_width > end_of_blocks_x {
+                end_of_title -= 1;
+                title_width = font.text_width(&title[..end_of_title]) as i16;
+            }
+
+            self.surface.font_draw().draw_text(
+                font,
+                self.scheme_selected.foreground,
+                title_start,
+                text_y,
+                &title[..end_of_title],
+            );
         }
 
         unsafe {

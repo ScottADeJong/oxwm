@@ -2,11 +2,32 @@ use super::blocks::Block;
 use super::font::{DrawingSurface, Font};
 use crate::Config;
 use crate::errors::X11Error;
+use crate::monitor::ScreenInfo;
 use std::time::Instant;
+use x11::xlib::_XDisplay;
 use x11rb::COPY_DEPTH_FROM_PARENT;
 use x11rb::connection::Connection;
 use x11rb::protocol::xproto::*;
 use x11rb::rust_connection::RustConnection;
+
+struct DrawElement {
+    display: *mut _XDisplay,
+    pixmap: x11::xlib::Pixmap,
+    window: Option<x11::xlib::Drawable>,
+    color: u32,
+    x: i32,
+    y: i32,
+    width: u32,
+    height: u32,
+}
+
+struct BarObject<'a> {
+    font: &'a Font,
+    color: u32,
+    x: i16,
+    y: i16,
+    text: String,
+}
 
 pub struct Bar {
     window: Window,
@@ -41,9 +62,7 @@ impl Bar {
         config: &Config,
         display: *mut x11::xlib::Display,
         font: &Font,
-        x: i16,
-        y: i16,
-        width: u16,
+        screen_info: &ScreenInfo,
         cursor: u32,
     ) -> Result<Self, X11Error> {
         let window = connection.generate_id()?;
@@ -55,9 +74,9 @@ impl Bar {
             COPY_DEPTH_FROM_PARENT,
             window,
             screen.root,
-            x,
-            y,
-            width,
+            screen_info.x as i16,
+            screen_info.y as i16,
+            screen_info.width as u16,
             height,
             0,
             WindowClass::INPUT_OUTPUT,
@@ -76,20 +95,17 @@ impl Bar {
                 .background(config.scheme_normal.background),
         )?;
 
-        unsafe {
-            x11::xlib::XDefineCursor(display, window as u64, cursor as u64);
-        }
+        define_cursor(display, window as u64, cursor as u64);
 
         connection.map_window(window)?;
         connection.flush()?;
 
-        let visual = unsafe { x11::xlib::XDefaultVisual(display, screen_num as i32) };
-        let colormap = unsafe { x11::xlib::XDefaultColormap(display, screen_num as i32) };
+        let (visual, colormap) = get_visual_and_colormap(display, screen_num as i32);
 
         let surface = DrawingSurface::new(
             display,
             window as x11::xlib::Drawable,
-            width as u32,
+            screen_info.width as u32,
             height as u32,
             visual,
             colormap,
@@ -122,7 +138,7 @@ impl Bar {
 
         Ok(Bar {
             window,
-            width,
+            width: screen_info.width as u16,
             height,
             graphics_context,
             surface,
@@ -180,6 +196,8 @@ impl Bar {
         }
     }
 
+    pub fn update_tags(&mut self) {}
+
     pub fn draw(
         &mut self,
         connection: &RustConnection,
@@ -203,25 +221,22 @@ impl Bar {
         )?;
         connection.flush()?;
 
-        unsafe {
-            let gc = x11::xlib::XCreateGC(display, self.surface.pixmap(), 0, std::ptr::null_mut());
-            x11::xlib::XSetForeground(display, gc, self.scheme_normal.background as u64);
-            x11::xlib::XFillRectangle(
-                display,
-                self.surface.pixmap(),
-                gc,
-                0,
-                0,
-                self.width as u32,
-                self.height as u32,
-            );
-            x11::xlib::XFreeGC(display, gc);
-        }
+        draw_elements(DrawElement {
+            display,
+            pixmap: self.surface.pixmap(),
+            window: None,
+            color: self.scheme_normal.background,
+            x: 0,
+            y: 0,
+            width: self.width as u32,
+            height: self.height as u32,
+        });
 
         self.last_occupied_tags = occupied_tags;
         self.last_current_tags = current_tags;
 
         let mut x_position: i16 = 0;
+        let mut bar_objects: Vec<BarObject> = Vec::new();
 
         for (tag_index, tag) in self.tags.iter().enumerate() {
             let tag_mask = 1 << tag_index;
@@ -250,10 +265,13 @@ impl Bar {
 
             let top_padding = 4;
             let text_y = top_padding + font.ascent();
-
-            self.surface
-                .font_draw()
-                .draw_text(font, scheme.foreground, text_x, text_y, tag);
+            bar_objects.push(BarObject {
+                font,
+                color: scheme.foreground,
+                x: text_x,
+                y: text_y,
+                text: tag.to_string(),
+            });
 
             if is_selected || is_urgent {
                 let font_height = font.height();
@@ -265,25 +283,16 @@ impl Bar {
                 let underline_width = tag_width - underline_padding;
                 let underline_x = x_position + (underline_padding / 2) as i16;
 
-                unsafe {
-                    let gc = x11::xlib::XCreateGC(
-                        display,
-                        self.surface.pixmap(),
-                        0,
-                        std::ptr::null_mut(),
-                    );
-                    x11::xlib::XSetForeground(display, gc, scheme.underline as u64);
-                    x11::xlib::XFillRectangle(
-                        display,
-                        self.surface.pixmap(),
-                        gc,
-                        underline_x as i32,
-                        underline_y as i32,
-                        underline_width as u32,
-                        underline_height as u32,
-                    );
-                    x11::xlib::XFreeGC(display, gc);
-                }
+                draw_elements(DrawElement {
+                    display,
+                    pixmap: self.surface.pixmap(),
+                    window: None,
+                    color: scheme.underline,
+                    x: underline_x as i32,
+                    y: underline_y as i32,
+                    width: underline_width as u32,
+                    height: underline_height as u32,
+                });
             }
 
             x_position += tag_width as i16;
@@ -295,13 +304,13 @@ impl Bar {
         let top_padding = 4;
         let text_y = top_padding + font.ascent();
 
-        self.surface.font_draw().draw_text(
+        bar_objects.push(BarObject {
             font,
-            self.scheme_normal.foreground,
-            text_x,
-            text_y,
-            layout_symbol,
-        );
+            color: self.scheme_normal.foreground,
+            x: text_x,
+            y: text_y,
+            text: layout_symbol.to_string(),
+        });
 
         x_position += font.text_width(layout_symbol) as i16;
 
@@ -311,13 +320,13 @@ impl Bar {
             let text_x = x_position;
             let text_y = top_padding + font.ascent();
 
-            self.surface.font_draw().draw_text(
+            bar_objects.push(BarObject {
                 font,
-                self.scheme_selected.foreground,
-                text_x,
-                text_y,
-                indicator,
-            );
+                color: self.scheme_normal.foreground,
+                x: text_x,
+                y: text_y,
+                text: indicator.to_string(),
+            });
         }
 
         let mut end_of_blocks_x = self.width as i16;
@@ -334,13 +343,13 @@ impl Bar {
                     let top_padding = 4;
                     let text_y = top_padding + font.ascent();
 
-                    self.surface.font_draw().draw_text(
+                    bar_objects.push(BarObject {
                         font,
-                        block.color(),
-                        x_position,
-                        text_y,
-                        &text,
-                    );
+                        color: block.color(),
+                        x: x_position,
+                        y: text_y,
+                        text,
+                    });
 
                     if self.block_underlines[i] {
                         let font_height = font.height();
@@ -352,25 +361,16 @@ impl Bar {
                         let underline_width = text_width + underline_padding;
                         let underline_x = x_position - (underline_padding / 2) as i16;
 
-                        unsafe {
-                            let gc = x11::xlib::XCreateGC(
-                                display,
-                                self.surface.pixmap(),
-                                0,
-                                std::ptr::null_mut(),
-                            );
-                            x11::xlib::XSetForeground(display, gc, block.color() as u64);
-                            x11::xlib::XFillRectangle(
-                                display,
-                                self.surface.pixmap(),
-                                gc,
-                                underline_x as i32,
-                                underline_y as i32,
-                                underline_width as u32,
-                                underline_height as u32,
-                            );
-                            x11::xlib::XFreeGC(display, gc);
-                        }
+                        draw_elements(DrawElement {
+                            display,
+                            pixmap: self.surface.pixmap(),
+                            window: None,
+                            color: block.color(),
+                            x: underline_x as i32,
+                            y: underline_y as i32,
+                            width: underline_width as u32,
+                            height: underline_height as u32,
+                        });
                     }
                 }
             }
@@ -395,37 +395,35 @@ impl Bar {
                 title_width = font.text_width(&title[..end_of_title]) as i16;
             }
 
-            self.surface.font_draw().draw_text(
+            bar_objects.push(BarObject {
                 font,
-                self.scheme_selected.foreground,
-                title_start,
-                text_y,
-                &title[..end_of_title],
+                color: self.scheme_selected.foreground,
+                x: title_start,
+                y: text_y,
+                text: title[..end_of_title].to_string(),
+            });
+        }
+
+        for object in bar_objects {
+            self.surface.font_draw().draw_text(
+                object.font,
+                object.color,
+                object.x,
+                object.y,
+                &object.text,
             );
         }
 
-        unsafe {
-            let gc = x11::xlib::XCreateGC(
-                display,
-                self.window as x11::xlib::Drawable,
-                0,
-                std::ptr::null_mut(),
-            );
-            x11::xlib::XCopyArea(
-                display,
-                self.surface.pixmap(),
-                self.window as x11::xlib::Drawable,
-                gc,
-                0,
-                0,
-                self.width as u32,
-                self.height as u32,
-                0,
-                0,
-            );
-            x11::xlib::XFreeGC(display, gc);
-            x11::xlib::XSync(display, 1);
-        }
+        draw_elements(DrawElement {
+            display,
+            pixmap: self.surface.pixmap(),
+            window: Some(self.window as x11::xlib::Drawable),
+            color: 0,
+            x: 0,
+            y: 0,
+            width: self.width as u32,
+            height: self.height as u32,
+        });
 
         self.needs_redraw = false;
 
@@ -480,5 +478,60 @@ impl Bar {
 
         self.status_text.clear();
         self.needs_redraw = true;
+    }
+}
+
+fn draw_elements(element: DrawElement) {
+    unsafe {
+        let gc = x11::xlib::XCreateGC(element.display, element.pixmap, 0, std::ptr::null_mut());
+        match element.window {
+            Some(w) => {
+                x11::xlib::XCopyArea(
+                    element.display,
+                    element.pixmap,
+                    w,
+                    gc,
+                    element.x,
+                    element.y,
+                    element.width,
+                    element.height,
+                    0,
+                    0,
+                );
+                x11::xlib::XFreeGC(element.display, gc);
+                x11::xlib::XSync(element.display, 1);
+            }
+            None => {
+                x11::xlib::XSetForeground(element.display, gc, element.color as u64);
+                x11::xlib::XFillRectangle(
+                    element.display,
+                    element.pixmap,
+                    gc,
+                    element.x,
+                    element.y,
+                    element.width,
+                    element.height,
+                );
+                x11::xlib::XFreeGC(element.display, gc);
+            }
+        }
+    }
+}
+
+fn define_cursor(display: *mut _XDisplay, window: u64, cursor: u64) {
+    unsafe {
+        x11::xlib::XDefineCursor(display, window, cursor);
+    }
+}
+
+fn get_visual_and_colormap(
+    display: *mut _XDisplay,
+    screen_num: i32,
+) -> (*mut x11::xlib::Visual, u64) {
+    unsafe {
+        (
+            x11::xlib::XDefaultVisual(display, screen_num),
+            x11::xlib::XDefaultColormap(display, screen_num),
+        )
     }
 }

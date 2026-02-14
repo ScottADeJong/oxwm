@@ -2,10 +2,22 @@ use crate::ColorScheme;
 use crate::bar::font::{DrawingSurface, Font};
 use crate::errors::X11Error;
 use crate::layout::tabbed::TAB_BAR_HEIGHT;
+use x11::xlib::_XDisplay;
 use x11rb::COPY_DEPTH_FROM_PARENT;
 use x11rb::connection::Connection;
 use x11rb::protocol::xproto::*;
 use x11rb::rust_connection::RustConnection;
+
+struct DrawElement {
+    display: *mut _XDisplay,
+    pixmap: x11::xlib::Pixmap,
+    window: Option<x11::xlib::Drawable>,
+    color: u32,
+    x: i32,
+    y: i32,
+    width: u32,
+    height: u32,
+}
 
 pub struct TabBar {
     window: Window,
@@ -64,15 +76,12 @@ impl TabBar {
                 .background(scheme_normal.background),
         )?;
 
-        unsafe {
-            x11::xlib::XDefineCursor(display, window as u64, cursor as u64);
-        }
+        define_cursor(display, window as u64, cursor as u64);
 
         connection.map_window(window)?;
         connection.flush()?;
 
-        let visual = unsafe { x11::xlib::XDefaultVisual(display, screen_num as i32) };
-        let colormap = unsafe { x11::xlib::XDefaultColormap(display, screen_num as i32) };
+        let (visual, colormap) = get_visual_and_colormap(display, screen_num as i32);
 
         let surface = DrawingSurface::new(
             display,
@@ -114,21 +123,16 @@ impl TabBar {
         )?;
         connection.flush()?;
 
-        unsafe {
-            let gc =
-                x11::xlib::XCreateGC(self.display, self.surface.pixmap(), 0, std::ptr::null_mut());
-            x11::xlib::XSetForeground(self.display, gc, self.scheme_normal.background as u64);
-            x11::xlib::XFillRectangle(
-                self.display,
-                self.surface.pixmap(),
-                gc,
-                0,
-                0,
-                self.width as u32,
-                self.height as u32,
-            );
-            x11::xlib::XFreeGC(self.display, gc);
-        }
+        draw_elements(DrawElement {
+            display: self.display,
+            pixmap: self.surface.pixmap(),
+            window: None,
+            color: self.scheme_normal.background,
+            x: 0,
+            y: 0,
+            width: self.width as u32,
+            height: self.height as u32,
+        });
 
         if windows.is_empty() {
             self.copy_pixmap_to_window();
@@ -170,25 +174,16 @@ impl TabBar {
                 let underline_height = 3;
                 let underline_y = self.height as i16 - underline_height;
 
-                unsafe {
-                    let gc = x11::xlib::XCreateGC(
-                        self.display,
-                        self.surface.pixmap(),
-                        0,
-                        std::ptr::null_mut(),
-                    );
-                    x11::xlib::XSetForeground(self.display, gc, scheme.underline as u64);
-                    x11::xlib::XFillRectangle(
-                        self.display,
-                        self.surface.pixmap(),
-                        gc,
-                        x_position as i32,
-                        underline_y as i32,
-                        tab_width as u32,
-                        underline_height as u32,
-                    );
-                    x11::xlib::XFreeGC(self.display, gc);
-                }
+                draw_elements(DrawElement {
+                    display: self.display,
+                    pixmap: self.surface.pixmap(),
+                    window: None,
+                    color: scheme.underline,
+                    x: x_position as i32,
+                    y: underline_y as i32,
+                    width: tab_width as u32,
+                    height: underline_height as u32,
+                });
             }
 
             x_position += tab_width as i16;
@@ -199,23 +194,16 @@ impl TabBar {
     }
 
     fn copy_pixmap_to_window(&self) {
-        unsafe {
-            let gc =
-                x11::xlib::XCreateGC(self.display, self.window as u64, 0, std::ptr::null_mut());
-            x11::xlib::XCopyArea(
-                self.display,
-                self.surface.pixmap(),
-                self.window as u64,
-                gc,
-                0,
-                0,
-                self.width as u32,
-                self.height as u32,
-                0,
-                0,
-            );
-            x11::xlib::XFreeGC(self.display, gc);
-        }
+        draw_elements(DrawElement {
+            display: self.display,
+            pixmap: self.surface.pixmap(),
+            window: Some(self.window as u64),
+            color: 0,
+            x: 0,
+            y: 0,
+            width: self.width as u32,
+            height: self.height as u32,
+        });
     }
 
     pub fn get_clicked_window(&self, windows: &[(Window, String)], click_x: i16) -> Option<Window> {
@@ -248,8 +236,7 @@ impl TabBar {
                 .width(width as u32),
         )?;
 
-        let visual = unsafe { x11::xlib::XDefaultVisual(self.display, 0) };
-        let colormap = unsafe { x11::xlib::XDefaultColormap(self.display, 0) };
+        let (visual, colormap) = get_visual_and_colormap(self.display, 0);
 
         self.surface = DrawingSurface::new(
             self.display,
@@ -274,5 +261,60 @@ impl TabBar {
         connection.map_window(self.window)?;
         connection.flush()?;
         Ok(())
+    }
+}
+
+fn draw_elements(element: DrawElement) {
+    unsafe {
+        let gc = x11::xlib::XCreateGC(element.display, element.pixmap, 0, std::ptr::null_mut());
+        match element.window {
+            Some(w) => {
+                x11::xlib::XCopyArea(
+                    element.display,
+                    element.pixmap,
+                    w,
+                    gc,
+                    element.x,
+                    element.y,
+                    element.width,
+                    element.height,
+                    0,
+                    0,
+                );
+                x11::xlib::XFreeGC(element.display, gc);
+                x11::xlib::XSync(element.display, 1);
+            }
+            None => {
+                x11::xlib::XSetForeground(element.display, gc, element.color as u64);
+                x11::xlib::XFillRectangle(
+                    element.display,
+                    element.pixmap,
+                    gc,
+                    element.x,
+                    element.y,
+                    element.width,
+                    element.height,
+                );
+                x11::xlib::XFreeGC(element.display, gc);
+            }
+        }
+    }
+}
+
+fn define_cursor(display: *mut _XDisplay, window: u64, cursor: u64) {
+    unsafe {
+        x11::xlib::XDefineCursor(display, window, cursor);
+    }
+}
+
+fn get_visual_and_colormap(
+    display: *mut _XDisplay,
+    screen_num: i32,
+) -> (*mut x11::xlib::Visual, u64) {
+    unsafe {
+        (
+            x11::xlib::XDefaultVisual(display, screen_num),
+            x11::xlib::XDefaultColormap(display, screen_num),
+        )
     }
 }

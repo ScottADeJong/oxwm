@@ -11,6 +11,7 @@ use crate::monitor::{Monitor, detect_monitors};
 use crate::overlay::{ErrorOverlay, KeybindOverlay, Overlay};
 use std::collections::{HashMap, HashSet};
 
+use x11::xlib::_XDisplay;
 use x11rb::connection::Connection;
 use x11rb::protocol::Event;
 use x11rb::protocol::xproto::*;
@@ -240,17 +241,15 @@ impl WindowManager {
             monitor.init_pertag(config.tags.len(), "tiling");
         }
 
-        let display = unsafe { x11::xlib::XOpenDisplay(std::ptr::null()) };
+        let display = open_display();
         if display.is_null() {
             return Err(WmError::X11(crate::errors::X11Error::DisplayOpenFailed));
         }
 
         // C has better C interop than rust.
-        let normal_cursor = unsafe { x11::xlib::XCreateFontCursor(display, 68) };
+        let normal_cursor = create_cursor(display);
 
-        unsafe {
-            x11::xlib::XDefineCursor(display, root as u64, normal_cursor);
-        }
+        define_cursor(display, root as u64, normal_cursor);
 
         let font = crate::bar::font::Font::new(display, screen_number as i32, &config.font)?;
 
@@ -263,9 +262,7 @@ impl WindowManager {
                 &config,
                 display,
                 &font,
-                monitor.screen_x as i16,
-                monitor.screen_y as i16,
-                monitor.screen_width as u16,
+                &monitor.screen_info,
                 normal_cursor as u32,
             )?;
             bars.push(bar);
@@ -280,10 +277,12 @@ impl WindowManager {
                 screen_number,
                 display,
                 &font,
-                (monitor.screen_x + config.gap_outer_horizontal as i32) as i16,
-                (monitor.screen_y as f32 + bar_height + config.gap_outer_vertical as f32) as i16,
+                (monitor.screen_info.x + config.gap_outer_horizontal as i32) as i16,
+                (monitor.screen_info.y as f32 + bar_height + config.gap_outer_vertical as f32)
+                    as i16,
                 monitor
-                    .screen_width
+                    .screen_info
+                    .width
                     .saturating_sub(2 * config.gap_outer_horizontal as i32) as u16,
                 config.scheme_occupied,
                 config.scheme_selected,
@@ -425,10 +424,10 @@ impl WindowManager {
 
     pub fn show_startup_config_error(&mut self, error: ConfigError) {
         let monitor = &self.monitors[self.selected_monitor];
-        let monitor_x = monitor.screen_x as i16;
-        let monitor_y = monitor.screen_y as i16;
-        let screen_width = monitor.screen_width as u16;
-        let screen_height = monitor.screen_height as u16;
+        let monitor_x = monitor.screen_info.x as i16;
+        let monitor_y = monitor.screen_info.y as i16;
+        let screen_width = monitor.screen_info.width as u16;
+        let screen_height = monitor.screen_info.height as u16;
 
         if let Err(e) = self.overlay.show_error(
             &self.connection,
@@ -797,7 +796,7 @@ impl WindowManager {
             0
         };
 
-        let available_width = monitor.screen_width - 2 * outer_gap as i32;
+        let available_width = monitor.screen_info.width - 2 * outer_gap as i32;
         let total_inner_gaps = inner_gap as i32 * (visible_count - 1) as i32;
         let window_width = (available_width - total_inner_gaps) / visible_count as i32;
         let scroll_amount = window_width + inner_gap as i32;
@@ -876,7 +875,7 @@ impl WindowManager {
             return Ok(());
         }
 
-        let available_width = monitor.screen_width - 2 * outer_gap as i32;
+        let available_width = monitor.screen_info.width - 2 * outer_gap as i32;
         let total_inner_gaps = inner_gap as i32 * (visible_count - 1) as i32;
         let window_width = (available_width - total_inner_gaps) / visible_count as i32;
         let scroll_step = window_width + inner_gap as i32;
@@ -949,7 +948,7 @@ impl WindowManager {
                     0
                 };
 
-                let available_width = monitor.screen_width - 2 * outer_gap as i32;
+                let available_width = monitor.screen_info.width - 2 * outer_gap as i32;
                 let total_inner_gaps =
                     inner_gap as i32 * (visible_count.min(tiled_count) - 1) as i32;
                 let window_width = if tiled_count <= visible_count {
@@ -1261,10 +1260,10 @@ impl WindowManager {
                     &self.connection,
                     &self.font,
                     &self.config.keybindings,
-                    monitor.screen_x as i16,
-                    monitor.screen_y as i16,
-                    monitor.screen_width as u16,
-                    monitor.screen_height as u16,
+                    monitor.screen_info.x as i16,
+                    monitor.screen_info.y as i16,
+                    monitor.screen_info.width as u16,
+                    monitor.screen_info.height as u16,
                 )?;
             }
             KeyAction::SetMasterFactor => {
@@ -1966,10 +1965,10 @@ impl WindowManager {
                 window,
                 &x11rb::protocol::xproto::ConfigureWindowAux::new()
                     .border_width(0)
-                    .x(monitor.screen_x)
-                    .y(monitor.screen_y)
-                    .width(monitor.screen_width as u32)
-                    .height(monitor.screen_height as u32)
+                    .x(monitor.screen_info.x)
+                    .y(monitor.screen_info.y)
+                    .width(monitor.screen_info.width as u32)
+                    .height(monitor.screen_info.height as u32)
                     .stack_mode(x11rb::protocol::xproto::StackMode::ABOVE),
             )?;
 
@@ -3493,10 +3492,10 @@ impl WindowManager {
                                     eprintln!("Config reload error: {}", err);
                                     self.error_message = Some(err.to_string());
                                     let monitor = &self.monitors[self.selected_monitor];
-                                    let monitor_x = monitor.screen_x as i16;
-                                    let monitor_y = monitor.screen_y as i16;
-                                    let screen_width = monitor.screen_width as u16;
-                                    let screen_height = monitor.screen_height as u16;
+                                    let monitor_x = monitor.screen_info.x as i16;
+                                    let monitor_y = monitor.screen_info.y as i16;
+                                    let screen_width = monitor.screen_info.width as u16;
+                                    let screen_height = monitor.screen_info.height as u16;
                                     match self.overlay.show_error(
                                         &self.connection,
                                         &self.font,
@@ -3689,13 +3688,13 @@ impl WindowManager {
                             if let Some(c) = self.clients.get_mut(&event.window) {
                                 c.old_x_position = c.x_position;
                             }
-                            x = monitor.screen_x + event.x as i32;
+                            x = monitor.screen_info.x + event.x as i32;
                         }
                         if event.value_mask.contains(ConfigWindow::Y) {
                             if let Some(c) = self.clients.get_mut(&event.window) {
                                 c.old_y_position = c.y_position;
                             }
-                            y = monitor.screen_y + event.y as i32;
+                            y = monitor.screen_info.y + event.y as i32;
                         }
                         if event.value_mask.contains(ConfigWindow::WIDTH) {
                             if let Some(c) = self.clients.get_mut(&event.window) {
@@ -3714,13 +3713,17 @@ impl WindowManager {
                         let width_with_border = w + 2 * bw;
                         let height_with_border = h + 2 * bw;
 
-                        if (x + w) > monitor.screen_x + monitor.screen_width && is_floating {
-                            x = monitor.screen_x
-                                + (monitor.screen_width / 2 - width_with_border / 2);
+                        if (x + w) > monitor.screen_info.x + monitor.screen_info.width
+                            && is_floating
+                        {
+                            x = monitor.screen_info.x
+                                + (monitor.screen_info.width / 2 - width_with_border / 2);
                         }
-                        if (y + h) > monitor.screen_y + monitor.screen_height && is_floating {
-                            y = monitor.screen_y
-                                + (monitor.screen_height / 2 - height_with_border / 2);
+                        if (y + h) > monitor.screen_info.y + monitor.screen_info.height
+                            && is_floating
+                        {
+                            y = monitor.screen_info.y
+                                + (monitor.screen_info.height / 2 - height_with_border / 2);
                         }
 
                         if let Some(c) = self.clients.get_mut(&event.window) {
@@ -3855,10 +3858,10 @@ impl WindowManager {
 
                         for monitor_index in 0..self.monitors.len() {
                             let monitor = &self.monitors[monitor_index];
-                            let monitor_x = monitor.screen_x;
-                            let monitor_y = monitor.screen_y;
-                            let monitor_width = monitor.screen_width as u32;
-                            let monitor_height = monitor.screen_height as u32;
+                            let monitor_x = monitor.screen_info.x;
+                            let monitor_y = monitor.screen_info.y;
+                            let monitor_width = monitor.screen_info.width as u32;
+                            let monitor_height = monitor.screen_info.height as u32;
 
                             let fullscreen_on_monitor: Vec<Window> = self
                                 .fullscreen_windows
@@ -3923,10 +3926,10 @@ impl WindowManager {
                     }
                 };
 
-                let monitor_x = monitor.screen_x;
-                let monitor_y = monitor.screen_y;
-                let monitor_width = monitor.screen_width;
-                let monitor_height = monitor.screen_height;
+                let monitor_x = monitor.screen_info.x;
+                let monitor_y = monitor.screen_info.y;
+                let monitor_width = monitor.screen_info.width;
+                let monitor_height = monitor.screen_info.height;
                 let scroll_offset = monitor.scroll_offset;
 
                 let mut visible: Vec<Window> = Vec::new();
@@ -4046,10 +4049,10 @@ impl WindowManager {
                             window,
                             &ConfigureWindowAux::new()
                                 .border_width(0)
-                                .x(monitor.screen_x)
-                                .y(monitor.screen_y)
-                                .width(monitor.screen_width as u32)
-                                .height(monitor.screen_height as u32)
+                                .x(monitor.screen_info.x)
+                                .y(monitor.screen_info.y)
+                                .width(monitor.screen_info.width as u32)
+                                .height(monitor.screen_info.height as u32)
                                 .stack_mode(StackMode::ABOVE),
                         )?;
                     }
@@ -4088,11 +4091,12 @@ impl WindowManager {
                         0.0
                     };
 
-                    let tab_bar_x = (monitor.screen_x + outer_horizontal as i32) as i16;
+                    let tab_bar_x = (monitor.screen_info.x + outer_horizontal as i32) as i16;
                     let tab_bar_y =
-                        (monitor.screen_y as f32 + bar_height + outer_vertical as f32) as i16;
+                        (monitor.screen_info.y as f32 + bar_height + outer_vertical as f32) as i16;
                     let tab_bar_width = monitor
-                        .screen_width
+                        .screen_info
+                        .width
                         .saturating_sub(2 * outer_horizontal as i32)
                         as u16;
 
@@ -4794,4 +4798,19 @@ impl WindowManager {
             eprintln!("[autostart] Spawned: {}", command);
         }
     }
+}
+
+fn define_cursor(display: *mut _XDisplay, window: u64, cursor: u64) {
+    unsafe {
+        x11::xlib::XDefineCursor(display, window, cursor);
+    }
+}
+
+fn open_display() -> *mut _XDisplay {
+    unsafe { x11::xlib::XOpenDisplay(std::ptr::null()) }
+}
+
+fn create_cursor(display: *mut _XDisplay) -> u64 {
+    // C has better C interop than rust.
+    unsafe { x11::xlib::XCreateFontCursor(display, 68) }
 }
